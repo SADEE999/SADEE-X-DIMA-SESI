@@ -1,0 +1,90 @@
+name: Extract ZIP and Deploy Admin
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "*.zip"
+      - ".github/workflows/deploy-admin.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find ZIP file
+        id: zip
+        shell: bash
+        run: |
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No ZIP file found."
+            exit 1
+          fi
+
+          echo "ZIP found: $ZIP_FILE"
+          echo "file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Extract ZIP
+        shell: bash
+        run: |
+          rm -rf extracted
+          mkdir -p extracted
+
+          unzip -o "${{ steps.zip.outputs.file }}" -d extracted
+
+          echo "Extracted files:"
+          find extracted -maxdepth 3 -type f | sort
+
+      - name: Find admin dashboard
+        shell: bash
+        run: |
+          mkdir -p public
+
+          ADMIN_DIR=$(find extracted -type d -name "admin-dashboard" | head -n 1)
+
+          if [ -n "$ADMIN_DIR" ]; then
+            echo "Admin dashboard found: $ADMIN_DIR"
+            cp -R "$ADMIN_DIR"/. public/
+          else
+            echo "admin-dashboard folder not found."
+            echo "Searching for index.html..."
+
+            INDEX=$(find extracted -type f -name "index.html" | head -n 1)
+
+            if [ -z "$INDEX" ]; then
+              echo "No index.html found."
+              exit 1
+            fi
+
+            cp -R "$(dirname "$INDEX")"/. public/
+          fi
+
+          echo "Deployment files:"
+          find public -maxdepth 3 -type f | sort
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
