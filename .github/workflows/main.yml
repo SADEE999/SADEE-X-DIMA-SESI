@@ -1,4 +1,4 @@
-name: SADEE X DIMA - Build App & Deploy Admin
+name: SADEE X DIMA - Build APK & Deploy Admin
 
 on:
   push:
@@ -13,9 +13,9 @@ permissions:
 
 jobs:
 
-  # ==================================================
-  # ANDROID APK
-  # ==================================================
+  # ==========================================
+  # ANDROID APK BUILD
+  # ==========================================
   build-android:
 
     name: Build Android APK
@@ -34,11 +34,11 @@ jobs:
           ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found."
+            echo "ERROR: ZIP file not found"
             exit 1
           fi
 
-          echo "ZIP: $ZIP_FILE"
+          echo "Found ZIP: $ZIP_FILE"
           echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Extract ZIP
@@ -49,17 +49,18 @@ jobs:
 
           unzip -o "${{ steps.zip.outputs.zip_file }}" -d extracted
 
-          echo "========== EXTRACTED =========="
-          find extracted -maxdepth 4 -type f | sort
+          echo "===== PROJECT FILES ====="
+          find extracted -maxdepth 5 -type f | sort
 
       - name: Find Android Project
         id: android
         shell: bash
         run: |
+
           PROJECT=$(find extracted -type f -name "settings.gradle" -printf '%h\n' | head -n 1)
 
           if [ -z "$PROJECT" ]; then
-            echo "ERROR: Android project not found."
+            echo "ERROR: settings.gradle not found"
             exit 1
           fi
 
@@ -68,65 +69,83 @@ jobs:
 
           echo "project=$PROJECT" >> "$GITHUB_OUTPUT"
 
-      # ------------------------------------------------
-      # FIX GRADLE REPOSITORY CONFLICT
-      # ------------------------------------------------
-      - name: Fix Gradle Repository Configuration
+      # ==========================================
+      # FORCE CORRECT GRADLE VERSION
+      # ==========================================
+      - name: Fix Gradle Wrapper
+        working-directory: ${{ steps.android.outputs.project }}
         shell: bash
         run: |
-          SETTINGS="${{ steps.android.outputs.project }}/settings.gradle"
 
-          echo "Checking:"
-          echo "$SETTINGS"
+          mkdir -p gradle/wrapper
 
-          if [ -f "$SETTINGS" ]; then
+          cat > gradle/wrapper/gradle-wrapper.properties <<'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.0-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+
+          echo "===== GRADLE VERSION ====="
+          cat gradle/wrapper/gradle-wrapper.properties
+
+      # ==========================================
+      # FIX REPOSITORY MODE
+      # ==========================================
+      - name: Fix Gradle Repository Configuration
+        working-directory: ${{ steps.android.outputs.project }}
+        shell: bash
+        run: |
+
+          if [ -f settings.gradle ]; then
 
             sed -i \
               's/RepositoriesMode\.FAIL_ON_PROJECT_REPOS/RepositoriesMode.PREFER_PROJECT/g' \
-              "$SETTINGS"
+              settings.gradle || true
 
             sed -i \
               's/RepositoriesMode\.PREFER_SETTINGS/RepositoriesMode.PREFER_PROJECT/g' \
-              "$SETTINGS"
+              settings.gradle || true
 
-            echo "========== SETTINGS.GRADLE =========="
-            cat "$SETTINGS"
           fi
 
-      # ------------------------------------------------
-      # JAVA
-      # ------------------------------------------------
+          echo "===== SETTINGS.GRADLE ====="
+          cat settings.gradle
+
+      # ==========================================
+      # JAVA 17
+      # ==========================================
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      # ------------------------------------------------
-      # GRADLE
-      # ------------------------------------------------
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      # ------------------------------------------------
-      # Make gradlew executable
-      # ------------------------------------------------
+      # ==========================================
+      # USE PROJECT GRADLE WRAPPER
+      # ==========================================
       - name: Make Gradle Wrapper Executable
         working-directory: ${{ steps.android.outputs.project }}
         run: |
           chmod +x gradlew
 
-      # ------------------------------------------------
-      # Build APK
-      # ------------------------------------------------
+      - name: Check Gradle Version
+        working-directory: ${{ steps.android.outputs.project }}
+        run: |
+          ./gradlew --version
+
+      # ==========================================
+      # BUILD APK
+      # ==========================================
       - name: Build Debug APK
         working-directory: ${{ steps.android.outputs.project }}
         run: |
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          ./gradlew clean assembleDebug --no-daemon --stacktrace
 
-      # ------------------------------------------------
-      # Upload APK
-      # ------------------------------------------------
+      # ==========================================
+      # UPLOAD APK AS ARTIFACT
+      # ==========================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -136,9 +155,9 @@ jobs:
           if-no-files-found: error
 
 
-  # ==================================================
-  # ADMIN DASHBOARD
-  # ==================================================
+  # ==========================================
+  # ADMIN DASHBOARD → GITHUB PAGES
+  # ==========================================
   deploy-admin:
 
     name: Deploy Admin Dashboard
@@ -157,27 +176,26 @@ jobs:
         id: zip
         shell: bash
         run: |
+
           ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found."
+            echo "ERROR: ZIP file not found"
             exit 1
           fi
 
-          echo "ZIP: $ZIP_FILE"
+          echo "Found ZIP: $ZIP_FILE"
           echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
       - name: Extract ZIP
         shell: bash
         run: |
+
           rm -rf extracted
           mkdir -p extracted
 
           unzip -o "${{ steps.zip.outputs.zip_file }}" -d extracted
 
-      # ------------------------------------------------
-      # Find admin dashboard
-      # ------------------------------------------------
       - name: Find Admin Dashboard
         id: admin
         shell: bash
@@ -186,18 +204,18 @@ jobs:
           ADMIN=$(find extracted -type d -name "admin-dashboard" | head -n 1)
 
           if [ -z "$ADMIN" ]; then
-            echo "ERROR: admin-dashboard folder not found."
 
-            echo "Searching for index.html..."
+            echo "admin-dashboard folder not found."
 
             INDEX=$(find extracted -type f -name "index.html" | head -n 1)
 
             if [ -z "$INDEX" ]; then
-              echo "ERROR: No admin dashboard found."
+              echo "ERROR: index.html not found"
               exit 1
             fi
 
             ADMIN=$(dirname "$INDEX")
+
           fi
 
           echo "Admin dashboard:"
@@ -205,9 +223,6 @@ jobs:
 
           echo "admin=$ADMIN" >> "$GITHUB_OUTPUT"
 
-      # ------------------------------------------------
-      # Prepare GitHub Pages
-      # ------------------------------------------------
       - name: Prepare Pages
         shell: bash
         run: |
@@ -217,12 +232,9 @@ jobs:
 
           cp -R "${{ steps.admin.outputs.admin }}/." public/
 
-          echo "========== PAGE FILES =========="
-          find public -maxdepth 3 -type f | sort
+          echo "===== ADMIN FILES ====="
+          find public -maxdepth 4 -type f | sort
 
-      # ------------------------------------------------
-      # GitHub Pages
-      # ------------------------------------------------
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
@@ -231,5 +243,5 @@ jobs:
         with:
           path: ./public
 
-      - name: Deploy GitHub Pages
+      - name: Deploy Pages
         uses: actions/deploy-pages@v4
